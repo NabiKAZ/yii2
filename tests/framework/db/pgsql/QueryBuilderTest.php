@@ -8,12 +8,11 @@
 namespace yiiunit\framework\db\pgsql;
 
 use yii\base\DynamicModel;
-use yii\db\Expression;
 use yii\db\ArrayExpression;
+use yii\db\Expression;
 use yii\db\JsonExpression;
 use yii\db\Query;
 use yii\db\Schema;
-use yii\helpers\Json;
 use yiiunit\data\base\TraversableObject;
 
 /**
@@ -93,12 +92,12 @@ class QueryBuilderTest extends \yiiunit\framework\db\QueryBuilderTest
 
             // array condition corner cases
             [['@>', 'id', new ArrayExpression([1])], '"id" @> ARRAY[:qp0]', [':qp0' => 1]],
-            'scalar can not be converted to array #1' => [['@>', 'id', new ArrayExpression(1)], '"id" @> \'{}\'', []],
-            ['scalar can not be converted to array #2' => ['@>', 'id', new ArrayExpression(false)], '"id" @> \'{}\'', []],
+            'scalar can not be converted to array #1' => [['@>', 'id', new ArrayExpression(1)], '"id" @> ARRAY[]', []],
+            ['scalar can not be converted to array #2' => ['@>', 'id', new ArrayExpression(false)], '"id" @> ARRAY[]', []],
             [['&&', 'price', new ArrayExpression([12, 14], 'float')], '"price" && ARRAY[:qp0, :qp1]::float[]', [':qp0' => 12, ':qp1' => 14]],
             [['@>', 'id', new ArrayExpression([2, 3])], '"id" @> ARRAY[:qp0, :qp1]', [':qp0' => 2, ':qp1' => 3]],
             'array of arrays' => [['@>', 'id', new ArrayExpression([[1,2], [3,4]], 'float', 2)], '"id" @> ARRAY[ARRAY[:qp0, :qp1]::float[], ARRAY[:qp2, :qp3]::float[]\\]::float[][]', [':qp0' => 1, ':qp1' => 2, ':qp2' => 3, ':qp3' => 4]],
-            [['@>', 'id', new ArrayExpression([])], '"id" @> \'{}\'', []],
+            [['@>', 'id', new ArrayExpression([])], '"id" @> ARRAY[]', []],
             'array can contain nulls' => [['@>', 'id', new ArrayExpression([null])], '"id" @> ARRAY[:qp0]', [':qp0' => null]],
             'traversable objects are supported' => [['@>', 'id', new ArrayExpression(new TraversableObject([1, 2, 3]))], '[[id]] @> ARRAY[:qp0, :qp1, :qp2]', [':qp0' => 1, ':qp1' => 2, ':qp2' => 3]],
             [['@>', 'time', new ArrayExpression([new Expression('now()')])], '[[time]] @> ARRAY[now()]', []],
@@ -159,7 +158,7 @@ class QueryBuilderTest extends \yiiunit\framework\db\QueryBuilderTest
     {
         $qb = $this->getQueryBuilder();
 
-        $expected = 'ALTER TABLE "foo1" ALTER COLUMN "bar" TYPE varchar(255)';
+        $expected = 'ALTER TABLE "foo1" ALTER COLUMN "bar" TYPE varchar(255), ALTER COLUMN "bar" DROP DEFAULT, ALTER COLUMN "bar" DROP NOT NULL';
         $sql = $qb->alterColumn('foo1', 'bar', 'varchar(255)');
         $this->assertEquals($expected, $sql);
 
@@ -173,6 +172,30 @@ class QueryBuilderTest extends \yiiunit\framework\db\QueryBuilderTest
 
         $expected = 'ALTER TABLE "foo1" ALTER COLUMN "bar" reset xyz';
         $sql = $qb->alterColumn('foo1', 'bar', 'reset xyz');
+        $this->assertEquals($expected, $sql);
+
+        $expected = 'ALTER TABLE "foo1" ALTER COLUMN "bar" TYPE varchar(255), ALTER COLUMN "bar" DROP DEFAULT, ALTER COLUMN "bar" DROP NOT NULL';
+        $sql = $qb->alterColumn('foo1', 'bar', $this->string(255));
+        $this->assertEquals($expected, $sql);
+
+        $expected = 'ALTER TABLE "foo1" ALTER COLUMN "bar" TYPE varchar(255), ALTER COLUMN "bar" DROP DEFAULT, ALTER COLUMN "bar" SET NOT NULL';
+        $sql = $qb->alterColumn('foo1', 'bar', $this->string(255)->notNull());
+        $this->assertEquals($expected, $sql);
+
+        $expected = 'ALTER TABLE "foo1" ALTER COLUMN "bar" TYPE varchar(255), ALTER COLUMN "bar" DROP DEFAULT, ALTER COLUMN "bar" DROP NOT NULL, ADD CONSTRAINT foo1_bar_check CHECK (char_length(bar) > 5)';
+        $sql = $qb->alterColumn('foo1', 'bar', $this->string(255)->check('char_length(bar) > 5'));
+        $this->assertEquals($expected, $sql);
+
+        $expected = 'ALTER TABLE "foo1" ALTER COLUMN "bar" TYPE varchar(255), ALTER COLUMN "bar" SET DEFAULT \'AbCdE\', ALTER COLUMN "bar" DROP NOT NULL';
+        $sql = $qb->alterColumn('foo1', 'bar', $this->string(255)->defaultValue('AbCdE'));
+        $this->assertEquals($expected, $sql);
+
+        $expected = 'ALTER TABLE "foo1" ALTER COLUMN "bar" TYPE timestamp(0), ALTER COLUMN "bar" SET DEFAULT CURRENT_TIMESTAMP, ALTER COLUMN "bar" DROP NOT NULL';
+        $sql = $qb->alterColumn('foo1', 'bar', $this->timestamp()->defaultExpression('CURRENT_TIMESTAMP'));
+        $this->assertEquals($expected, $sql);
+
+        $expected = 'ALTER TABLE "foo1" ALTER COLUMN "bar" TYPE varchar(30), ALTER COLUMN "bar" DROP DEFAULT, ALTER COLUMN "bar" DROP NOT NULL, ADD UNIQUE ("bar")';
+        $sql = $qb->alterColumn('foo1', 'bar', $this->string(30)->unique());
         $this->assertEquals($expected, $sql);
     }
 
@@ -324,6 +347,12 @@ class QueryBuilderTest extends \yiiunit\framework\db\QueryBuilderTest
                     'INSERT INTO {{%T_upsert}} ("email", [[time]]) SELECT :phEmail AS "email", now() AS [[time]] ON CONFLICT ("email") DO UPDATE SET "ts"=:qp1, [[orders]]=T_upsert.orders + 1',
                 ],
             ],
+            'no columns to update' => [
+                3 => [
+                    'WITH "EXCLUDED" ("a") AS (VALUES (CAST(:qp0 AS int2))) INSERT INTO "T_upsert_1" ("a") SELECT "a" FROM "EXCLUDED" WHERE NOT EXISTS (SELECT 1 FROM "T_upsert_1" WHERE (("T_upsert_1"."a"="EXCLUDED"."a")))',
+                    'INSERT INTO "T_upsert_1" ("a") VALUES (:qp0) ON CONFLICT DO NOTHING',
+                ],
+            ],
         ];
         $newData = parent::upsertProvider();
         foreach ($concreteData as $testName => $data) {
@@ -352,5 +381,30 @@ class QueryBuilderTest extends \yiiunit\framework\db\QueryBuilderTest
         ];
 
         return $items;
+    }
+
+    public function testDropIndex()
+    {
+        $qb = $this->getQueryBuilder();
+
+        $expected = 'DROP INDEX "index"';
+        $sql = $qb->dropIndex('index', '{{table}}');
+        $this->assertEquals($expected, $sql);
+
+        $expected = 'DROP INDEX "schema"."index"';
+        $sql = $qb->dropIndex('index', '{{schema.table}}');
+        $this->assertEquals($expected, $sql);
+
+        $expected = 'DROP INDEX "schema"."index"';
+        $sql = $qb->dropIndex('schema.index', '{{schema2.table}}');
+        $this->assertEquals($expected, $sql);
+
+        $expected = 'DROP INDEX "schema"."index"';
+        $sql = $qb->dropIndex('index', '{{schema.%table}}');
+        $this->assertEquals($expected, $sql);
+
+        $expected = 'DROP INDEX {{%schema.index}}';
+        $sql = $qb->dropIndex('index', '{{%schema.table}}');
+        $this->assertEquals($expected, $sql);
     }
 }

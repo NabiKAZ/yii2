@@ -16,6 +16,28 @@ use yiiunit\framework\db\DatabaseTestCase;
 class ProfileFixture extends ActiveFixture
 {
     public $modelClass = 'yiiunit\data\ar\Profile';
+
+    public function beforeLoad()
+    {
+        if ($this->db->driverName === 'sqlsrv') {
+            $this->db->createCommand()->truncateTable('profile')->execute();
+        }
+
+        parent::beforeLoad();
+    }
+
+    protected function getData()
+    {
+        $data = parent::getData();
+
+        if ($this->db->driverName === 'sqlsrv') {
+            array_walk($data, static function (&$item) {
+                unset($item['id']);
+            });
+        }
+
+        return $data;
+    }
 }
 
 class CustomerFixture extends ActiveFixture
@@ -25,6 +47,15 @@ class CustomerFixture extends ActiveFixture
     public $depends = [
         'yiiunit\framework\test\ProfileFixture',
     ];
+
+    public function beforeLoad()
+    {
+        if ($this->db->driverName === 'sqlsrv') {
+            $this->db->createCommand()->truncateTable('customer')->execute();
+        }
+
+        parent::beforeLoad();
+    }
 }
 
 class CustomDirectoryFixture extends ActiveFixture
@@ -32,8 +63,21 @@ class CustomDirectoryFixture extends ActiveFixture
     public $modelClass = 'yiiunit\data\ar\Customer';
 
     public $dataDirectory = '@app/framework/test/custom';
+
+    public function beforeLoad()
+    {
+        if ($this->db->driverName === 'sqlsrv') {
+            $this->db->createCommand()->truncateTable('customer')->execute();
+        }
+
+        parent::beforeLoad();
+    }
 }
 
+class AnimalFixture extends ActiveFixture
+{
+    public $modelClass = 'yiiunit\data\ar\Animal';
+}
 
 class BaseDbTestCase
 {
@@ -81,6 +125,19 @@ class DataPathDbTestCase extends BaseDbTestCase
         ];
     }
 }
+
+class TruncateTestCase extends BaseDbTestCase
+{
+    public function fixtures()
+    {
+        return [
+            'animals' => [
+                'class' => AnimalFixture::className(),
+            ]
+        ];
+    }
+}
+
 
 /**
  * @group fixture
@@ -165,6 +222,15 @@ class ActiveFixtureTest extends DatabaseTestCase
         $this->assertEquals(1, $customer->id);
         $this->assertEquals('customer1@example.com', $customer['email']);
         $test->tearDown();
+    }
 
+    public function testTruncate()
+    {
+        $test = new TruncateTestCase();
+
+        $test->setUp();
+        $fixture = $test->getFixture('animals');
+        $this->assertEmpty($fixture->data);
+        $test->tearDown();
     }
 }
